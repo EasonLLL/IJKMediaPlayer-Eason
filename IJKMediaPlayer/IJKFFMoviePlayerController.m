@@ -37,6 +37,9 @@
 #import <AssetsLibrary/ALAssetsLibrary.h>
 #include "string.h"
 #include "ffmpeg.h"
+
+#include <sys/param.h>
+#include <sys/mount.h>
 static const char *kIJKFFRequiredFFmpegVersion = "ff3.4--ijk0.8.7--20180103--001";
 
 // It means you didn't call shutdown if you found this object leaked.
@@ -816,7 +819,7 @@ inline static int getPlayerOption(IJKFFOptionCategory category)
     ffmpeg_main(argc, argv);
 
 
-    NSLog(@"convertAVItoMP4input outputFilePath = %@", *outputvideoUrl);
+    //NSLog(@"convertAVItoMP4input outputFilePath = %@", *outputvideoUrl);
     if ([[NSFileManager defaultManager] fileExistsAtPath:outputFilePath]){
         //這裡放置如果檔案存在時的程式
         NSLog(@"convertAVItoMP4input outputFilePath = %@\n檔案存在！", outputFilePath);
@@ -824,13 +827,33 @@ inline static int getPlayerOption(IJKFFOptionCategory category)
         NSLog(@"convertAVItoMP4input outputFilePath = %@\n檔案不存在！", outputFilePath);
     }
 }
-
-+ (void)clearTmpDirectory
+#pragma mark - 清除APP內,tmp資料夾內的資料
+- (void)clearTmpDirectory
 {
     NSArray* tmpDirectory = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:NSTemporaryDirectory() error:NULL];
     for (NSString *file in tmpDirectory) {
         [[NSFileManager defaultManager] removeItemAtPath:[NSString stringWithFormat:@"%@%@", NSTemporaryDirectory(), file] error:NULL];
     }
+}
+
+#pragma mark - 讀取手機空間
+- (NSString *)freeDiskSpaceInBytes{
+    struct statfs buf;
+    unsigned long long freeSpace = -1;
+    if (statfs("/var", &buf) >= 0) {
+        freeSpace = (unsigned long long)(buf.f_bsize * buf.f_bavail);
+    }
+    NSString *str = [NSString stringWithFormat:@"手機剩餘儲存空間為：%0.2lld MB",freeSpace/1024/1024];
+    return str;
+}
+- (NSInteger)freeDiskSpaceInBytesReturnInt{
+    struct statfs buf;
+    unsigned long long freeSpace = -1;
+    if (statfs("/var", &buf) >= 0) {
+        freeSpace = (unsigned long long)(buf.f_bsize * buf.f_bavail);
+    }
+    //NSString *str = [NSString stringWithFormat:@"手機剩餘儲存空間為：%0.2lld MB",freeSpace/1024/1024];
+    return freeSpace/1024/1024;
 }
 #pragma mark - STOP_RECORD
 //>=0: OK, <0:Error
@@ -918,20 +941,49 @@ inline static int getPlayerOption(IJKFFOptionCategory category)
                 PHAssetResourceCreationOptions *options = [[PHAssetResourceCreationOptions alloc] init];
                 options.shouldMoveFile = YES;
                 PHAssetCreationRequest *changeRequest = [PHAssetCreationRequest creationRequestForAsset];
-                [changeRequest addResourceWithType:PHAssetResourceTypeVideo fileURL:outputvideoUrl options:options];
+
+                NSLog(@"手機剩餘空間=%@\n", [self freeDiskSpaceInBytes]); //add by Eason - 1023 錄影大小
+                int const DiskSizeLessWarn = 100;// 警告容量少於100Mb
+                //判斷手機空間<100M,就跳出警示
+                if ([self freeDiskSpaceInBytesReturnInt] < DiskSizeLessWarn)
+                {
+                    //如果空間不足,就清除APP內的tmp資料夾
+                    [self clearTmpDirectory];
+                    NSLog(@"手機剩餘空間=%@,清除APP內的tmp資料夾\n", [self freeDiskSpaceInBytes]);
+                }
+                else
+                {
+                    [changeRequest addResourceWithType:PHAssetResourceTypeVideo fileURL:outputvideoUrl options:options];
+                }
+
             }
             else {
                 //iOS8之后加入的，它的使用稍微复杂一点，不过它允许进行批量的操作，例如添加、修改、删除等。
                 NSLog(@" Saved with iOS8 Photos PHAssetChangeRequest\n");
                 //[PHAssetChangeRequest creationRequestForAssetFromVideoAtFileURL:videoUrl];
-                [PHAssetChangeRequest creationRequestForAssetFromVideoAtFileURL:outputvideoUrl];
+
+                NSLog(@"手機剩餘空間=%@\n", [self freeDiskSpaceInBytes]); //add by Eason - 1023 錄影大小
+                int const DiskSizeLessWarn = 100;// 警告容量少於100Mb
+                //判斷手機空間<100M,就跳出警示
+                if ([self freeDiskSpaceInBytesReturnInt] < DiskSizeLessWarn)
+                {
+                    //如果空間不足,就清除APP內的tmp資料夾
+                    [self clearTmpDirectory];
+                    NSLog(@"手機剩餘空間=%@,清除APP內的tmp資料夾\n", [self freeDiskSpaceInBytes]);
+                }
+                else
+                {
+                    [PHAssetChangeRequest creationRequestForAssetFromVideoAtFileURL:outputvideoUrl];
+                }
+
             }
 
         } completionHandler:^( BOOL success, NSError *error ) {
             if ( ! success ) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Stop" message:@"Save video file into photo album failed." delegate:self cancelButtonTitle:@"Dismiss" otherButtonTitles:nil];
-                    [alert show];
+                    //UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Stop" message:@"Save video file into photo album failed." delegate:self cancelButtonTitle:@"Dismiss" otherButtonTitles:nil];
+                    //[alert show];
+                    NSLog(@"Save video file into photo album failed.\n");
                 });
                 //NSLog(@" Saved Failed %@", outputFilePath, error);
             }
